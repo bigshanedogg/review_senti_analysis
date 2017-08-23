@@ -1,18 +1,22 @@
-library(xlsx)
-library(KoNLP)
+#install.packages("KoNLP")
+#install.packages("rJava")
+library(KoNLP) 
 #useSejongDic()
 useNIADic()
 
 #---------------------#file input#---------------------#
-setwd("/Users/hodong/Desktop/data_project/naver_movie/fr25to135p20")
-mp <- data.frame(read.csv("movie_prepared.csv",header=TRUE))
-dp <- data.frame(read.csv("data_prepared.csv",header=TRUE))
-dtr <- data.frame(read.csv("data_train.csv",header=TRUE))
-dte <- data.frame(read.csv("data_test.csv",header=TRUE))
+#setwd("/Users/hodong/Desktop/review_senti_analysis/r_code/")
+mp <- data.frame(read.csv("../raw_data/movie_prepared.csv",header=TRUE))
+hm <- data.frame(read.csv("../raw_data/half_m.csv",header=TRUE))
 #---------------------#file input#---------------------#
 
 
 #---------------------#functions#---------------------#
+#spliting data into training set & testing set
+split_vec <- function(x, ratio){
+  return(sample(seq(1, nrow(x),1), round(nrow(x)*ratio,0)))
+}
+
 #refining reviews to text&sentiment
 sen_divide <- function(x){
   if(x<=6){ return("B") }
@@ -27,8 +31,6 @@ ext_noun <- function(x){
   x5 <- head(sort(table(x4),decreasing=T),30)
   return(x5)
 }
-
-#function for getting word probability table
 
 #function for getting word probability table
 get_prob_tab <- function(x,y){ #x : eg. ob_wd, oa_wd, og_wd // y : eg. b_rvs, a_rvs, g_rvs
@@ -46,8 +48,8 @@ get_prob_tab <- function(x,y){ #x : eg. ob_wd, oa_wd, og_wd // y : eg. b_rvs, a_
 }
 
 #get probability of specific class
-predict_tab <- function(x,y1,y2,z1,z2){ #x:tdtr, y1:gw_prob/gw_prob2, y2:bw_prob/bw_prob2, z1:g_prob, z2:b_porb
-  prd_df <- data.frame(matrix(nrow=nrow(tdtr), ncol=4))
+predict_tab <- function(x,y1,y2,z1,z2){ #x:tdte, y1:gw_prob/gw_prob2, y2:bw_prob/bw_prob2, z1:g_prob, z2:b_porb
+  prd_df <- data.frame(matrix(nrow=nrow(tdte), ncol=4))
   names(prd_df) <- c("G","B","predicted","actual")
   for(i in 1:nrow(x)){
     #for(i in 1:10000){
@@ -62,12 +64,23 @@ predict_tab <- function(x,y1,y2,z1,z2){ #x:tdtr, y1:gw_prob/gw_prob2, y2:bw_prob
 #---------------------#functions#---------------------#
 
 #---------------------#data preparing1 - dividing label#---------------------#
-dtr$senti <- sapply(dtr$score,sen_divide)
-dte$senti <- sapply(dte$score,sen_divide)
-dtr$content <- as.character(dtr$content)
-dte$content <- as.character(dte$content)
-tdte <- dte[,6:7]
-tdtr <- dtr[,6:7]
+hm$senti <- sapply(hm$score, sen_divide)
+hm_b <- hm[which(hm$senti=="B"),]
+hm_g <- hm[sample(which(hm$senti=="G"), nrow(hm_b)),]
+
+temp <- split_vec(hm_b, 0.8)
+hm_b_tr <- hm_b[temp,]
+hm_b_te <- hm_b[-temp,]
+
+temp <- split_vec(hm_g, 0.8)
+hm_g_tr <- hm_g[temp,]
+hm_g_te <- hm_g[-temp,]
+
+tdtr <- data.frame(rbind(hm_b_tr, hm_g_tr))
+tdte <- data.frame(rbind(hm_b_te, hm_g_te))
+
+tdte <- tdte[,6:7]
+tdtr <- tdtr[,6:7]
 
 b_rvs <- tdtr[which(tdtr$senti=="B"),]
 g_rvs <- tdtr[which(tdtr$senti=="G"),]
@@ -98,14 +111,14 @@ gw_prob2 <- get_prob_tab(og_wd, g_rvs)
 
 
 #---------------------#Implementing Naive bayesian classifier#---------------------#
-prd_df <- predict_tab(tdtr, gw_prob, bw_prob, g_prob, b_prob)
-prd_df2 <- predict_tab(tdtr, gw_prob2, bw_prob2, g_prob, b_prob)
+prd_df <- predict_tab(tdte, gw_prob, bw_prob, g_prob, b_prob)
+prd_df2 <- predict_tab(tdte, gw_prob2, bw_prob2, g_prob, b_prob)
 
-accuracy <- sum(ifelse(as.character(prd_df$actual)==as.character(prd_df$predicted),1,0),na.rm=TRUE)/nrow(tdtr)
-accuracy2 <- sum(ifelse(as.character(prd_df2$actual)==as.character(prd_df2$predicted),1,0),na.rm=TRUE)/nrow(tdtr)
+accuracy <- sum(ifelse(as.character(prd_df$actual)==as.character(prd_df$predicted),1,0),na.rm=TRUE)/nrow(tdte)
+accuracy2 <- sum(ifelse(as.character(prd_df2$actual)==as.character(prd_df2$predicted),1,0),na.rm=TRUE)/nrow(tdte)
 
-accuracy #SejongDic:0.6716523 #NIAdic:0.7386124
-accuracy2 #SejongDic:0.664398 #NIAdic:0.696866
+accuracy #SejongDic:?? #NIAdic:0.4988466
+accuracy2 #SejongDic:?? #NIAdic:0.4988466
 
 write.csv(prd_df, file="/Users/hodong/Desktop/prd_df.csv",row.names=FALSE)
 write.csv(prd_df2, file="/Users/hodong/Desktop/prd_df2.csv",row.names=FALSE)

@@ -1,18 +1,22 @@
-library(xlsx)
+#install.packages("KoNLP")
+#install.packages("rJava")
 library(KoNLP)
 #useSejongDic()
 useNIADic()
 
 #---------------------#file input#---------------------#
-setwd("/Users/hodong/Desktop/data_project/naver_movie/fr25to135p20")
-mp <- data.frame(read.csv("movie_prepared.csv",header=TRUE))
-dp <- data.frame(read.csv("data_prepared.csv",header=TRUE))
-dtr <- data.frame(read.csv("data_train.csv",header=TRUE))
-dte <- data.frame(read.csv("data_test.csv",header=TRUE))
+#setwd("/Users/hodong/Desktop/review_senti_analysis/r_code/")
+mp <- data.frame(read.csv("../raw_data/movie_prepared.csv",header=TRUE))
+hm <- data.frame(read.csv("../raw_data/half_m.csv",header=TRUE))
 #---------------------#file input#---------------------#
 
 
 #---------------------#functions#---------------------#
+#spliting data into training set & testing set
+split_vec <- function(x, ratio){
+  return(sample(seq(1, nrow(x),1), round(nrow(x)*ratio,0)))
+}
+
 #refining reviews to text&sentiment
 sen_divide <- function(x){
   if(x<=4){ return("B") }
@@ -32,8 +36,6 @@ ext_noun <- function(x){
 }
 
 #function for getting word probability table
-
-#function for getting word probability table
 get_prob_tab <- function(x,y,r){ #x : eg. ob_wd, oa_wd, og_wd // y : eg. b_rvs, a_rvs, g_rvs
   bw_prob <- data.frame(matrix(nrow=2,ncol=length(x)))  
   names(bw_prob) <- x
@@ -48,16 +50,17 @@ get_prob_tab <- function(x,y,r){ #x : eg. ob_wd, oa_wd, og_wd // y : eg. b_rvs, 
   return(bw_prob)
 }
 
-predict_tab <- function(x,y1,y2,y3,z1,z2,z3){ #x:tdtr, y1:gw_prob/gw_prob2, y2:bw_prob/bw_prob2, y3:aw_prob/aw_prob2, z1:g_prob, z2:b_prob, z3:a_prob
-  prd_df <- data.frame(matrix(nrow=nrow(tdtr), ncol=5))
+#get probability of specific class
+predict_tab <- function(x,y1,y2,y3,z1,z2,z3){ #x:tdte, y1:gw_prob/gw_prob2, y2:bw_prob/bw_prob2, y3:aw_prob/aw_prob2, z1:g_prob, z2:b_prob, z3:a_prob
+  prd_df <- data.frame(matrix(nrow=nrow(x), ncol=5))
   names(prd_df) <- c("G","A","B","predicted","actual")
   for(i in 1:nrow(x)){
     #for(i in 1:10000){
-    temp <- extractNoun(x[i,]$content)
+    temp <- extractNoun(as.character(x[i,]$content))
     prd_df[i,]$actual <- x[i,]$senti
-    prd_df[i,]$G <- prod(y1[t(ifelse(temp %in% names(y1), 1, 2))])*z1
-    prd_df[i,]$B <- prod(y2[t(ifelse(temp %in% names(y2), 1, 2))])*z2
-    prd_df[i,]$A <- prod(y3[t(ifelse(temp %in% names(y3), 1, 2))])*z3
+    prd_df[i,]$G <- prod(y1[t(ifelse(names(y1) %in% temp, 1, 2))])*z1
+    prd_df[i,]$B <- prod(y2[t(ifelse(names(y2) %in% temp, 1, 2))])*z2
+    prd_df[i,]$A <- prod(y3[t(ifelse(names(y3) %in% temp, 1, 2))])*z3
     prd_df[i,]$predicted <- names(prd_df)[which(prd_df[i,]==max(prd_df[i,]$G, prd_df[i,]$A, prd_df[i,]$B, na.rm=TRUE))]
   }
   return(prd_df)
@@ -65,12 +68,28 @@ predict_tab <- function(x,y1,y2,y3,z1,z2,z3){ #x:tdtr, y1:gw_prob/gw_prob2, y2:b
 #---------------------#functions#---------------------#
 
 #---------------------#data preparing1 - dividing label#---------------------#
-dtr$senti <- sapply(dtr$score,sen_divide)
-dte$senti <- sapply(dte$score,sen_divide)
-dtr$content <- as.character(dtr$content)
-dte$content <- as.character(dte$content)
-tdte <- dte[,6:7]
-tdtr <- dtr[,6:7]
+hm$senti <- sapply(hm$score, sen_divide)
+hm_b <- hm[which(hm$senti=="B"),]
+hm_a <- hm[which(hm$senti=="A"),]
+hm_g <- hm[sample(which(hm$senti=="G"), mean(nrow(hm_b, nrow(hm_a)))),]
+
+temp <- split_vec(hm_b, 0.8)
+hm_b_tr <- hm_b[temp,]
+hm_b_te <- hm_b[-temp,]
+
+temp <- split_vec(hm_a, 0.8)
+hm_a_tr <- hm_a[temp,]
+hm_a_te <- hm_a[-temp,]
+
+temp <- split_vec(hm_g, 0.8)
+hm_g_tr <- hm_g[temp,]
+hm_g_te <- hm_g[-temp,]
+
+tdtr <- data.frame(rbind(hm_b_tr, hm_a_tr, hm_g_tr))
+tdte <- data.frame(rbind(hm_b_te, hm_a_te, hm_g_te))
+
+tdte <- tdte[,6:7]
+tdtr <- tdtr[,6:7]
 
 b_rvs <- tdtr[which(tdtr$senti=="B"),]
 a_rvs <- tdtr[which(tdtr$senti=="A"),]
@@ -108,14 +127,14 @@ gw_prob2 <- get_prob_tab(og_wd, g_rvs)
 
 
 #---------------------#Implementing Naive bayesian classifier#---------------------#
-prd_df <- predict_tab(tdtr, gw_prob, bw_prob, aw_prob, g_prob, b_prob, a_prob)
-prd_df2 <- predict_tab(tdtr, gw_prob2, bw_prob2, aw_prob2, g_prob, b_prob, a_prob)
+prd_df <- predict_tab(tdte, gw_prob, bw_prob, aw_prob, g_prob, b_prob, a_prob)
+prd_df2 <- predict_tab(tdte, gw_prob2, bw_prob2, aw_prob2, g_prob, b_prob, a_prob)
 
-accuracy <- sum(ifelse(as.character(prd_df$actual)==as.character(prd_df$predicted),1,0),na.rm=TRUE)/nrow(tdtr)
-accuracy2 <- sum(ifelse(as.character(prd_df2$actual)==as.character(prd_df2$predicted),1,0),na.rm=TRUE)/nrow(tdtr)
+accuracy <- sum(ifelse(as.character(prd_df$actual)==as.character(prd_df$predicted),1,0),na.rm=TRUE)/nrow(tdte)
+accuracy2 <- sum(ifelse(as.character(prd_df2$actual)==as.character(prd_df2$predicted),1,0),na.rm=TRUE)/nrow(tdte)
 
-accuracy #SejongDic:0.6567361 #NIAdic:0.6646969
-accuracy2 #SejongDic:0.5731888 #NIAdic:0.5967994
+accuracy #SejongDic:0.4373054 #NIAdic:0.3309135
+accuracy2 #SejongDic:0.4373054 #NIAdic:0.3436537
 
 write.csv(prd_df, file="/Users/hodong/Desktop/prd_df.csv",row.names=FALSE)
 write.csv(prd_df2, file="/Users/hodong/Desktop/prd_df2.csv",row.names=FALSE)
